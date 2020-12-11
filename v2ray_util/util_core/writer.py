@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
 import json
 import random
 import string
 import uuid
 
 from .config import Config
-from .utils import port_is_use, StreamType, random_port
-from .loader import Loader
+from .utils import StreamType, random_port
 from .group import Mtproto, Vmess, Socks, Vless, Trojan, Xtls
 
 def clean_mtproto_tag(config, group_index):
@@ -215,14 +213,23 @@ class StreamWriter(Writer):
                 ws["wsSettings"]["headers"]["Host"] = kw['host']
             self.part_json["streamSettings"] = ws
 
-        elif self.stream_type in (StreamType.VLESS, StreamType.VLESS_XTLS):
+        elif self.stream_type in (StreamType.VLESS, StreamType.VLESS_XTLS, StreamType.VLESS_WS):
             vless = self.load_template('vless.json')
             vless["clients"][0]["id"] = str(uuid.uuid1())
             if self.stream_type == StreamType.VLESS_XTLS:
                 vless["clients"][0]["flow"] = kw["flow"]
+            elif self.stream_type == StreamType.VLESS_WS:
+                del vless["fallbacks"]
             self.part_json['protocol'] = "vless"
             self.part_json["settings"] = vless
-            self.part_json["streamSettings"] = self.load_template('tcp.json')
+            if self.stream_type == StreamType.VLESS_WS:
+                ws = self.load_template('ws.json')
+                ws["wsSettings"]["path"] = '/' + ''.join(random.sample(string.ascii_letters + string.digits, 8)) + '/'
+                if "host" in kw:
+                    ws["wsSettings"]["headers"]["Host"] = kw['host']
+                self.part_json["streamSettings"] = ws
+            else:
+                self.part_json["streamSettings"] = self.load_template('tcp.json')
             self.save()
             alpn = ["http/1.1"]
             # tls的设置
@@ -513,7 +520,7 @@ class GlobalWriter(Writer):
         self.save()
 
 class NodeWriter(Writer):
-    def create_new_port(self, newPort, protocol, **kw):
+    def create_new_port(self, newPort):
         # init new inbound
         server = self.load_template('server.json')
         new_inbound = server["inbounds"][0]
@@ -522,11 +529,6 @@ class NodeWriter(Writer):
         self.config["inbounds"].append(new_inbound)
         print(_("add port group success!"))
         self.save()
-
-        reload_data = Loader()
-        new_group_list = reload_data.profile.group_list
-        stream_writer = StreamWriter(new_group_list[-1].tag, new_group_list[-1].index, protocol)
-        stream_writer.write(**kw)
 
     def create_new_user(self, **kw):
         '''
